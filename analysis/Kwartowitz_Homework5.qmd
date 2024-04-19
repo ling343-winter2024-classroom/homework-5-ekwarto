@@ -1,0 +1,265 @@
+---
+title: "Homework 5"
+author: "Ellie Kwartowitz"
+format: 
+  html:
+    embed-resources: true
+editor: visual
+editor_options:
+  chunk_output_type: console
+---
+
+```{r}
+#install.packages("kableExtra")
+#install.packages("logistf")
+#| warning: false
+library(tidyverse)
+library(kableExtra)
+library(logistf)
+
+```
+
+## Prediction in the maze
+
+Hypothesis and Predictions:
+
+The hypothesis of the study performed was that unexpected articles, as well as nouns, create slower focal reading times. The study predicted that reading times are inversely related to both article and noun cloze probabilities. So, as a result, slower readers will demonstrate larger effects of expectation when it comes to performing the maze task.
+
+## Importing Data
+
+```{r}
+#directory <- "C:\\Users\\cpgl0052\\Dropbox\\Research\\delong maze\\"
+here::i_am("analysis/Kwartowitz_Homework5.qmd")
+library(here)
+d <- read.csv(here("data/delong maze 40Ss.csv"), 
+              header = 0, sep = ",", comment.char = "#", strip.white = T,
+              col.names = c("Index","Time","Counter","Hash","Owner","Controller","Item","Element","Type","Group","FieldName","Value","WordNum","Word","Alt","WordOn","CorrWord","RT","Sent","TotalTime","Question","Resp","Acc","RespRT"));
+
+```
+
+## Codebook/data dictionary
+
+```{r}
+df_dictionary <- tibble::tribble(
+  ~variable, ~use,
+  "Index", "Unique identifier for each observation",
+  "Time", "Time of the observation",
+  "Counter", "Counter value",
+  "Hash", "Hash value",
+  "Owner", "Owner of the observation",
+  "Controller", "Controller of the observation",
+  "Item", "Item identifier",
+  "Element", "Element identifier",
+  "Type", "Type of observation",
+  "Group", "Group identifier",
+  "FieldNaame", "Name of the field",
+  "Value", "Value of the observation",
+  "WordNum", "Word number",
+  "Word", "Word",
+  "Alt", "Alt value",
+  "WordOn", "Word onset",
+  "CorrWord", "Corrected word",
+  "RT", "Response time",
+  "Sent", "Sentence identifier",
+  "TotalTime", "Total time",
+  "Question", "Question identifier",
+  "Resp", "Response",
+  "Acc", "Accuracy",
+  "RespRT", "Response time"
+)
+df_dictionary
+
+df_dictionary %>%
+  kbl() %>%
+  kable_styling()
+  
+```
+
+## Participant Information
+
+```{r}
+resp <- d[d$Controller == "Question" & substr(d$Type,1,4) != "prac", c(1:10,21:24)]
+resp <- separate(data = resp, col = Type, into = c("exp", "item", "expect", "position", "pos", "cloze", "art.cloze", "n.cloze"), sep = "\\.", convert = TRUE, fill = "right")
+resp <- as.data.frame(lapply(resp, function (x) if (is.factor(x) | is.character(x)) factor(x) else x))
+resp$Acc <- as.numeric(as.character(resp$Acc))
+resp$RespRT <- as.numeric(as.character(resp$RespRT))
+
+resp %>% summarize(n=n(), acc=mean(Acc), acc.sd=sd(Acc), rt=mean(RespRT), rt.sd=sd(RespRT)) %>% as.data.frame()
+
+resp %>% group_by(Hash) %>% summarize(n=n(), acc=mean(Acc), acc.sd=sd(Acc), rt=mean(RespRT), rt.sd=sd(RespRT)) %>% mutate(keep = acc > mean(acc)-2*sd(acc)) %>% arrange(acc) %>% as.data.frame()
+#remove 1 subject at 52% accuracy - all others >70%
+
+# Number of unique participants
+num_participants <- resp %>% 
+  distinct(Hash) %>% 
+  nrow()
+
+# Print the number of participants
+num_participants
+```
+
+Within this study the dataset contains data for `r num_participants` participants.
+
+## Data Analysis
+
+```{r}
+rt <- d[d$Controller == "Maze" & substr(d$Type,1,4) != "prac", c(1:10,13:20)]
+rt <- separate(data = rt, col = Type, into = c("exp", "item", "expect", "position", "pos", "cloze", "art.cloze", "n.cloze"), sep = "\\.", convert = TRUE, fill = "right")
+rt <- as.data.frame(lapply(rt, function (x) if (is.factor(x) | is.character(x)) factor(x) else x))
+rt$WordNum <- as.numeric(as.character(rt$WordNum))
+rt$RT <- as.numeric(as.character(rt$RT))
+rt$TotalTime <- as.numeric(as.character(rt$TotalTime))
+rt$Acc <- as.numeric(as.character(recode(rt$CorrWord, yes = "1", no = "0")))
+rt$n.cloze.scale <- scale(rt$n.cloze)
+rt$art.cloze.scale <- scale(rt$art.cloze)
+
+# Removing item 29 due to incorrect noun pairing
+resp <- resp[resp$item != 29,]
+rt <- rt[rt$item != 29,]
+
+### Comprehension question response analysis
+
+resp %>% summarize(n=n(), acc=mean(Acc), acc.sd=sd(Acc), rt=mean(RespRT), rt.sd=sd(RespRT)) %>% as.data.frame()
+
+resp %>% group_by(Hash) %>% summarize(n=n(), acc=mean(Acc), acc.sd=sd(Acc), rt=mean(RespRT), rt.sd=sd(RespRT)) %>% mutate(keep = acc > mean(acc)-2*sd(acc)) %>% arrange(acc) %>% as.data.frame()
+
+#remove 1 subject at 52% accuracy - all others >70%
+
+resp.s <- resp[resp$Hash != '9dAvrH0+R6a0U5adPzZSyA',]
+resp.s %>% summarize(n=n(), acc=mean(Acc), rt=mean(RespRT)) %>% as.data.frame()
+
+### Maze reading analysis
+
+#Note: Rgn0 is article, Rgn1 is noun
+
+rt.s <- rt[rt$Hash != '9dAvrH0+R6a0U5adPzZSyA',]
+
+rt.s$rgn.fix <- rt.s$WordNum - rt.s$pos + 1
+rt.s$word.num.z <- scale(rt.s$WordNum)
+rt.s$word.len <- nchar(as.character(rt.s$Word))
+rt.s$Altword.len <- nchar(as.character(rt.s$Alt))
+contrasts(rt.s$expect) <- c(-.5,.5)
+
+rt.s$item.expect <- paste(rt.s$item, rt.s$expect, sep=".")
+
+#Response accuracy
+rt.s %>% filter(rgn.fix > -4 & rgn.fix < 5) %>% summarize(n=n(), acc=mean(Acc), sd=sd(Acc), error=1-acc)
+rt.s %>% filter(rgn.fix == 0) %>% summarize(n=n(), acc=mean(Acc), sd=sd(Acc), error=1-acc)
+rt.s %>% filter(rgn.fix == 1) %>% summarize(n=n(), acc=mean(Acc), sd=sd(Acc), error=1-acc)
+rt.s %>% filter(rgn.fix > -4 & rgn.fix < 4) %>% group_by(Hash) %>% summarize(n=n(), acc=mean(Acc), sd=sd(Acc), error=1-acc) %>% mutate(keep = acc > mean(acc)-2*sd(acc)) %>% arrange(acc) %>% as.data.frame()
+#remove 2 (73.5% and 81.9%) - all others >90%
+
+rt.s.filt <- rt.s[rt.s$Hash != "gyxidIf0fqXBM7nxg2K7SQ" & rt.s$Hash != "f8dC3CkleTBP9lUufzUOyQ",]
+
+rt.s.filt %>% filter(rgn.fix > -4 & rgn.fix < 5) %>% summarize(n=n(), acc=mean(Acc), sd=sd(Acc), error=1-acc)
+rt.s.filt %>% filter(rgn.fix == 0) %>% summarize(n=n(), acc=mean(Acc), sd=sd(Acc), error=1-acc)
+rt.s.filt %>% filter(rgn.fix == 1) %>% summarize(n=n(), acc=mean(Acc), sd=sd(Acc), error=1-acc)
+
+# Number of rows after datasets have been filtered
+num_rows_resp <- nrow(resp)
+num_rows_rt <- nrow(rt)
+num_rows_resp_s <- nrow(resp.s)
+num_rows_rt_s <-nrow(rt.s.filt)
+
+# Print number of rows remaining
+num_rows_resp
+num_rows_rt
+num_rows_resp_s
+num_rows_rt_s
+```
+
+After removal of the trials as described in the "data analysis" section of Prediction in the Maze the amount of rows in the dataset changed. One of the pieces of the data that was excluded was Item 29, which was removed as a result of a coding error. After removing this item from the resp and rt datasets there remained `num_rows_resp` and `num_rows_rt` rows of data. Alongside this, words with error responses, such as those with post-error 'correct' responses, were removed. After filtering the response analysis and accuracy there remained `num_rows_resp_s` and `num_rows_rt_s` rows of data.
+
+## Mean, Max, Minimum, and Standard Deviation of Participant Ages
+
+```{r}
+demo <- d[d$Controller == "Form",1:12]
+names(demo) <- c("Subject","MD5","TrialType","Number","Element","Experiment","Item","Field","Response","X","field","resp")
+demo <- as.data.frame(lapply(demo, function (x) if (is.factor(x) | is.character(x)) factor(x) else x)) 
+
+
+demo %>% filter(field == "age") %>% summarize(m.age = mean(as.numeric(as.character(resp))), 
+                                              min.age = min(as.numeric(as.character(resp))), 
+                                              max.age = max(as.numeric(as.character(resp))),
+                                              sd.age = sd(as.numeric(as.character(resp))))
+
+
+df_demo <- tibble::tribble(
+  ~computation, ~ age,
+  "Mean", "34.87179",
+  "Minimum", "18",
+  "Maximum", "71",
+  "Standard Deviation", "14.08093",
+)
+df_demo
+
+df_demo %>%
+  kbl() %>%
+  kable_styling()
+```
+
+## Figure 1
+
+```{r}
+#Analyze Response Times
+rt.s.filt %>% filter(rgn.fix > -4 & rgn.fix < 5) %>% filter(Acc == 1) %>% summarize(n=n(), rt=mean(RT), rt.sd=sd(RT), med=median(RT), rt.min=min(RT), rt.max=max(RT))
+rt.s.filt %>% filter(rgn.fix > -4 & rgn.fix < 5) %>% filter(Acc == 1) %>% group_by(Hash) %>% summarize(n=n(), rt=mean(RT), rt.sd=sd(RT), med=median(RT), rt.min=min(RT), rt.max=max(RT)) %>% mutate(keep = rt > mean(rt)-2*sd(rt) | rt < mean(rt)+2*sd(rt)) %>% as.data.frame()
+#all Ss kept
+
+#Filter out reading errors
+rt.s.rgn <- rt.s.filt %>% filter(rgn.fix > -4 & rgn.fix < 5) %>% filter(Acc == 1) %>% as.data.frame()
+hist(rt.s.rgn$RT, breaks=100)
+hist(log(rt.s.rgn$RT), breaks=100)
+
+#Graph raw (error free) RTs
+rgn.rt.raw <- rt.s.filt %>% filter(rgn.fix > -4 & rgn.fix < 5) %>% filter(Acc == 1) %>% group_by(rgn.fix, expect) %>% summarize(n=n(), subj=length(unique(Hash)), rt=mean(RT), sd=sd(RT), stderr=sd/sqrt(subj)) %>% as.data.frame()
+rgn.rt.raw$rgn <- as.factor(recode(rgn.rt.raw$rgn.fix, "-3"="CW-3", "-2"="CW-2", "-1"="CW-1", "0"="art", "1"="n","2"="CW+1", "3"="CW+2", "4"="CW+3"))
+rgn.rt.raw$rgn <- ordered(rgn.rt.raw$rgn, levels = c("CW-3", "CW-2", "CW-1", "art", "n", "CW+1", "CW+2", "CW+3"))
+ggplot(rgn.rt.raw, aes(x=rgn, y=rt, group=expect, shape=expect)) +
+  geom_line(stat = "identity", position=position_dodge(width=.3)) +
+  geom_point(stat = "identity", position=position_dodge(width=.3), size=3) +
+  geom_errorbar(aes(ymin = rt-stderr, ymax = rt+stderr), width=.15, position=position_dodge(width=.3)) +
+  scale_shape_manual(name="", labels=c("Expected", "Unexpected"), values = c(21,19)) + 
+  xlab("Word") + ylab("Reading Time (msec)") + 
+  theme_bw()
+```
+
+## Table demonstrating Figure 1 results
+
+```{r}
+rgn.rt.raw <- rt.s.filt %>% filter(rgn.fix > -4 & rgn.fix < 5) %>% filter(Acc == 1) %>% group_by(rgn.fix, expect) %>% summarize(n=n(), subj=length(unique(Hash)), rt=mean(RT), sd=sd(RT), stderr=sd/sqrt(subj)) %>% as.data.frame()
+
+df_rt_expected <- tibble::tribble(
+  ~word, ~RT,
+  "CW-3", "753.1880",
+  "CW-2", "733.0036",
+  "CW-1", "760.2436",
+  "art", "674.1306",
+  "n", "704.2190",
+  "CW+1", "781.0073",
+  "CW+2", "785.0631",
+  "CW+3", "766.7514"
+)
+df_rt_expected
+
+df_rt_unexpected <- tibble::tribble(
+  ~word, ~RT,
+  "CW-3", "757.1725",
+  "CW-2", "742.7986",
+  "CW-1", "751.1713",
+  "art", "719.3884",
+  "n", "1061.6347",
+  "CW+1", "859.8654",
+  "CW+2", "793.6538",
+  "CW+3", "789.8782"
+)
+df_rt_unexpected
+
+df_rt_expected %>%
+  kbl() %>%
+  kable_styling()
+
+df_rt_unexpected %>%
+  kbl() %>%
+  kable_styling()
+```
