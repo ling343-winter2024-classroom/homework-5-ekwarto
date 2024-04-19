@@ -1,0 +1,11 @@
+---
+title: "Class24"
+author: "Ellie Kwartowitz"
+format: pdf
+editor: visual
+---
+
+```{r}
+library(tidyverse)
+msleep
+```
